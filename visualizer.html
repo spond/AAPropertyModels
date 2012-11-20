@@ -1,0 +1,404 @@
+<html>
+	<head>
+		<META http-equiv="Content-Style-Type" content="text/css">
+		<meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1">
+		<title>
+			Visualization tester
+		</title>		
+		<LINK REL=STYLESHEET TYPE="text/css" HREF="http://www.datamonkey.org/2007/styles.css">
+		
+        <script src="d3.v2.js"></script>
+ 	</head>
+
+<body  bgcolor = "#FFFFFF"' style = 'font-family:arial;'>
+
+<h2 id = 'title'>   </h2>
+
+<span> Site: <select id = 'site_selected' onchange = 'changeSiteOrModel()'></select> 
+Model: <select id = 'site_model' onchange = 'changeSiteOrModel()' style="margin-right:20px;"></select> LogL = <span id = "logL""></span>,  mean &omega; = <span id = "omega""></span></span>
+<p/>
+<table>
+<tr>
+    <td>
+        <table id = 'exch_table' style='width:500px;font-family:courier;font-size:12px;' cellspacing = '0px'>
+        <caption>Site exchangeability matrix</caption>
+        </table>    
+
+    </td>
+    <td style = 'vertical-align:top;'>
+        <table id = 'legend' style = 'width:20px; margin-left: 20px;font-family:courier;font-size:12px;'>
+        <caption>Value</caption>
+        </table>
+    </td>
+    <td style = 'vertical-align:top;'>
+        <div id = 'rate_plots'>
+        </div>
+    </td>
+</tr>
+<tr>
+    <td colspan = 3 style = 'align:left;'>
+        <div style = 'border: black 1px dotted'>
+        <dl id = 'model_parameter_list' style = 'margin-top:10px;'>
+        </dl>
+        </div>
+    </td>
+</tr>
+</table>
+
+
+
+<script type="text/javascript" language = "javascript1.7">
+
+    var _colorizer = d3.interpolateRgb  (d3.rgb(255,255,255),d3.rgb(0,0,0));
+    var _colorizer2 = d3.interpolateRgb (d3.rgb(255,0,0),d3.rgb(0,0,255));
+    var _property_differences = {};
+    
+    function computeWhichSettings () {
+        if ("NULL SETTINGS" in d3.select("body").datum()) {
+            var model = document.getElementById("site_model");
+            if (model.options[model.selectedIndex].value != "Full model") {
+                return "NULL SETTINGS";
+            }
+        }
+        return "SETTINGS";
+    }
+
+    function changeSiteOrModel() {
+        site  = document.getElementById("site_selected");
+        model = document.getElementById("site_model");
+        logL  = document.getElementById("logL");
+        param_values = get_values_by_site (site.options[site.selectedIndex].value, model.options[model.selectedIndex].value);
+        logL.innerHTML = param_values[1];
+        set_parameter_table (param_values);
+        set_exch_matrix (["ACGILMPSTV", "DENQ", "FWY", "HKR"],param_values,computeWhichSettings());
+    }
+    
+
+    function get_parameter_values () {
+        var param_table  = d3.select ("#model_parameter_list");
+        var param_names  = param_table.selectAll ("span").data();
+        var param_values =  param_table.selectAll ('input[type|="range"]')[0];
+        var new_param_set = [[]];
+        for (obj = 0; obj < param_values.length; obj ++) {
+            new_param_set[0].push([param_names[obj],param_values[obj].value]);
+        }
+        return new_param_set;
+    }
+
+    function wrap_handle_change (i) {
+        var tied_object = d3.select ("#model_parameter_list").selectAll ('input[type|="text"]')[0][i];
+        return function handle_rate_change () {
+            tied_object.value = parseFloat(this.value).toFixed (3);
+            set_exch_matrix (["ACGILMPSTV", "DENQ", "FWY", "HKR"],get_parameter_values (),computeWhichSettings());
+        }
+   }
+
+    function draw_an_svg_rate_plot (rates, differences) {
+         var chart = d3.select("#rate_plots").selectAll ("svg").data ([0]);
+         chart.enter ().append ("svg")
+             .attr("class", "chart")
+             .attr("width", 400)
+             .attr("height",400)
+             .attr("transform", "translate (10,10)");
+         
+         chart = d3.select("#rate_plots").selectAll ("svg");
+         
+         var joint       = [];
+         var tags        = [];
+         
+         for (var k in rates) {
+            tags.push (k);
+            joint.push ([]);
+            joint[joint.length-1].push (rates[k]);
+            var diffs = differences[k];
+            for (var k2 in diffs) {
+                joint[joint.length-1].push (diffs[k2]);  
+            }
+         }    
+             
+             
+        var max_rate = d3.max(joint, function (d) {return d[0];});
+    
+        var y = d3.scale.linear()
+                .domain([0,max_rate*1.05])
+                .range( [0, 380]);
+                
+        var individual_props = [];
+        var prop_count = joint[0].length;
+        for (var k = 1; k < prop_count; k++) {
+            individual_props.push(k);
+        }
+        
+        
+        chart.selectAll("g").data(individual_props).enter().append ("g");
+        
+        var groups = chart.selectAll("g").each(function (d,i) {   
+                var x = d3.scale.linear()
+                        .domain([d3.min(joint, function (d) {return d[i+1];})*1.05, d3.max(joint, function (d) {return d[i+1];})*1.05])
+                        .range( [0, 380]);
+                        
+                 this_element = d3.select (this);
+                                  
+                 this_element.selectAll("circle").data(joint)
+                    .enter().append("circle").append("title");
+                    
+                 prop_id = i;   
+                    
+                 this_element.selectAll("circle")
+                    .attr("cy", function (d) {return 380-y(d[0]);})
+                    .attr("cx", function (d) {return x(d[i+1]);})
+                    .attr("r", 4)
+                    //.attr("title", function (d,i) {return tags[i];})
+                    .attr("fill", function (d) {return _colorizer2 (prop_id/(prop_count-1))})
+                    .attr("stroke", "black").selectAll("title").text (function (d,i,j) {return tags[j] + " (property " + (prop_id+1) + ")";});    
+        });    
+    }
+    
+    
+    function set_parameter_table (param_values) {
+        //d3.select ("#model_parameter_list").selectAll ("dd").remove();
+        var param_placeholders = d3.select ("#model_parameter_list").selectAll ("dd").data (param_values[0]);
+        param_placeholders.enter().append ("dd");
+        
+        param_placeholders = d3.select ("#model_parameter_list").selectAll ("dd");
+        param_placeholders.selectAll ("span").data(function(d) {return [d[0]];}).enter().append ("span");
+        param_placeholders.selectAll ("input").data(function(d) {var x=d[1]; return [x.toFixed(3),x];}).enter().append ("input");
+        
+        var all_spans = param_placeholders.selectAll ("span");
+        all_spans.text  (function (d) {return d;})
+                 .style ("display","inline-block")
+                 .style ("width","150px");
+                 
+        param_placeholders.selectAll ("input").attr ("type", function (d,i) { if (i%2) return "range"; return "text";});
+        var all_value_boxes = param_placeholders.selectAll ('input[type|="text"]');
+        all_value_boxes.property  ("value",function (d) {return d;})
+                       .attr  ("readonly","readonly");
+      
+        d3.select ("#model_parameter_list").selectAll('input[type|="range"]').each (function (d,i) {this.onchange = wrap_handle_change(i);});
+        param_placeholders.selectAll ('input[type|="range"]')
+                         //.on ("change", handle_rate_change)
+                         .property  ("value",function (d) {return d;})        
+                         .property  ("min",-50 )
+                         .property  ("max",50)
+                         .property  ("step",0.001)
+                         .style     ("width","300px");
+                        
+       // all_sliders.property  ("onchange",slider_move);
+        return 0;
+    }
+
+    function load_analysis_results  (json_object) {
+        settings_info = json_object["SETTINGS"];
+        d3.select ("#title").text (json_object['SETTINGS']['Metric'] + " based on " + json_object['SETTINGS']['Properties'] + " features");
+
+        var has_null_model = "NULL SETTINGS" in json_object;     
+        
+        for (key in {"SETTINGS":0, "NULL SETTINGS":1}) {
+            if (key in json_object) {
+                for (aa in json_object[key]["Multipliers"]) {
+                    json_object[key]["Multipliers"][aa] = json_object[key]["Multipliers"][aa].replace (/Min/g,'Math.min').replace(/Exp/g,'Math.exp').replace(/Abs/g,'Math.abs');
+                }
+            }
+        }
+        
+        key = "SETTINGS";
+        
+        for (var aa in json_object[key]["Differences"]) {
+            var diffs = (json_object[key]["Differences"])[aa];
+            _property_differences[aa] = [];
+            for (prop_diff in diffs) {
+                _property_differences[aa].push (diffs[prop_diff]);
+            }
+        }
+        
+        d3.select ("body").datum (json_object);
+        
+        var available_models = [];
+        var models = d3.select ("#site_selected");
+        var model_names = d3.select ("#site_model");
+        var obj_count = Object.keys (json_object).length -1 -has_null_model;
+        var site_indices = [];
+        
+        for (k = 0; k < obj_count; k++) {
+            if ("CONSTANT" in json_object ["" + k]) {
+                continue;
+            }
+            if (available_models.length == 0) {
+                for (model in json_object["" + k]) {
+                   available_models.push (model);
+                }
+                available_models.sort();
+            }
+            models.append ("option");
+            site_indices.push (k);
+        }   
+        
+        var site_options = models.selectAll ("option");
+        site_options.data (site_indices);
+        site_options.text (function (d) {return (d+1).toFixed(0);});
+        site_options.attr ("value", function (d) {return d;});
+        
+        site_options     = model_names.selectAll ("option").data(available_models).enter().append("option");
+        site_options.text (function (d) {return d;});
+        site_options.attr ("value", function (d) {return d;});
+        
+        document.getElementById("site_selected").onchange();
+       
+        return 0;
+    }
+
+
+    
+    function numberToColor (value, normalizer) {
+        if (typeof (value) == "string") {
+            return "rgba (1,1,1,1)";
+        }
+        return _colorizer (1-Math.exp(-20*value/normalizer));
+    }
+    
+    function fgColor (value, normalizer) {
+        if (typeof (value) == "string") {
+            return "rgba (1,1,1,1)";
+        }
+        
+        var score = 1-Math.exp(-20*value/normalizer);
+        
+        if (score > 0.45) {
+            return "white";
+        }
+        return "black";
+    }
+    
+    function get_values_by_site (site_id, model) {
+        values = [[]];
+        mles = d3.select ("body").datum()["" + site_id][model]["MLES"];
+        
+        for (propname in mles) {
+            values[0].push ([propname, mles[propname]]);
+        }
+        values.push (d3.select ("body").datum()["" + site_id][model]["LogL"]);
+        return values;
+    }
+    
+    
+    function evaluate_exchangeabilities (formulas, parameter_values) {
+        exch_list = {};
+        for (parameter in parameter_values[0]) {
+            eval ("var " + parameter_values[0][parameter][0] + " = " + parameter_values[0][parameter][1]);
+        }
+        
+        for (aa_pair in formulas) {
+            exch_list[aa_pair] = eval (formulas[aa_pair]);
+        }
+        //console.log (exch_list);
+        return exch_list;
+    }
+
+    function set_exch_matrix (aa_binning, parameter_values, which_settings) {    
+    
+        var amino_acid_ordering = aa_binning.join("");
+        var aa_index_to_group   = [];
+        var aa_letter_to_index  = [];
+        var counter             = 0;
+        var counter2            = 0;
+        
+        for (group in aa_binning) {
+            for (letter in aa_binning[group]) {
+                aa_index_to_group.push (counter);
+                aa_letter_to_index[letter] = counter2;
+                counter2++;
+            }
+            counter ++;
+        }
+        
+        var matrix = [];
+        matrix.push ([]);
+        matrix[0].push("");
+        
+        for (k2 = 0; k2 < 20; k2+=1) {
+            matrix[0].push(amino_acid_ordering[k2]);
+        }
+        
+        var values = {};
+        _analysis_data = d3.select("body").datum();
+        if (_analysis_data && parameter_values) {
+            if (which_settings) {
+                values = evaluate_exchangeabilities (_analysis_data[which_settings]["Multipliers"],parameter_values);
+            } else {
+                values = evaluate_exchangeabilities (_analysis_data["SETTINGS"]["Multipliers"],parameter_values);            
+            }
+        } 
+
+        draw_an_svg_rate_plot (values,_property_differences);
+        
+        var unique_rates = [];
+
+        for (k = 1; k < 21; k += 1) {
+            matrix.push ([]);
+            matrix[k].push (amino_acid_ordering [k-1]);
+            for (k2 = 0; k2 < 20; k2+=1) {
+                aa_pair = amino_acid_ordering [k-1] + amino_acid_ordering [k2];
+                if (aa_pair in values) {
+                    matrix[k].push (values[aa_pair]);
+                    unique_rates.push (values[aa_pair]);
+                 } else {
+                    aa_pair = amino_acid_ordering [k2] + amino_acid_ordering [k-1];
+                    if (aa_pair in values) {
+                        matrix[k].push (values[aa_pair]);
+                    } else {
+                        matrix[k].push ("");
+                        unique_rates.push (values[aa_pair]);
+                    }
+                }
+            }
+        }
+        
+        //console.log (d3.extent (unique_rates), d3.mean (unique_rates), d3.median (unique_rates));  
+                
+        var exch_table = d3.select("#exch_table");
+        exch_table.datum({'ordering':amino_acid_ordering,'max':0});
+                
+        var tr = exch_table.selectAll("tr").data(matrix);
+        tr.enter().append("tr");
+        var td = tr.selectAll("td").data(function(d) { return d; });
+        td.enter().append("td");
+        td.text (function (d,i) { if (typeof (d) == "number") {exch_table.datum(function (d2) {if (typeof (d) == "number")  d2 ['max'] = Math.max(d2['max'],d); return d2;}); return "";} return d;});
+        
+        td = exch_table.selectAll("tr").selectAll("td");
+        td.style("background-color", function(d) { return numberToColor(d,exch_table.datum()['max']); });
+        td.style("border-left", function(d,col_id,row_id) { if (col_id > 1) { if (aa_index_to_group[col_id-1] != aa_index_to_group[col_id-2]) {return "2px solid black";}} return "none";} );
+        td.style("border-top", function(d,col_id,row_id) { if (row_id > 1) { if (aa_index_to_group[row_id-1] != aa_index_to_group[row_id-2]) {return "2px solid black";}} return "none";} );
+        td.style("text-align", "center");
+        td.attr("title", function(d,i,j) { if (typeof(d) == 'number') return d.toPrecision(3) +" (" + amino_acid_ordering[i-1] + "-" + amino_acid_ordering[j-1]+ ")"; return d;});
+                    
+        var levels = [];
+        var table_max = exch_table.datum()['max'];
+        
+        var power_scale = d3.scale.pow().domain ([0.,1.]).range ([0.,table_max]).exponent (3);
+        
+        for (k = 0; k < 11; k+=1) {
+           levels.push ([power_scale(k*.1)]);
+        }
+                    
+        var legend_table = d3.select("#legend");
+        tr = legend_table.selectAll("tr").data(levels);
+        tr.enter().append("tr");
+        td = tr.selectAll("td").data(function(d) { return d; });
+        td.enter().append("td"); 
+        td = tr.selectAll("td");
+        td.text (function (d) {return d.toFixed(2);});        
+        td.style("background-color", function(d) { return numberToColor(d,table_max); });
+        td.style("color", function(d) { return fgColor (d,table_max); });
+        
+        d3.select ("#omega").text (d3.mean (unique_rates).toFixed (3));
+        
+        return 0;
+    }
+    
+    
+    d3.json("file:///Users/sergei/Dropbox/AAPropertyGrant/code/empirical_data/H5N1_HA.fel", load_analysis_results);
+ 
+</script>
+        
+</body>
+</html>
