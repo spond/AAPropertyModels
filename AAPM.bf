@@ -9,8 +9,6 @@ ASSUME_REVERSIBLE_MODELS = 1;
 ExecuteAFile        ("QCAP.mdl");
 ExecuteAFile        (HYPHY_LIB_DIRECTORY + "TemplateBatchFiles" + DIRECTORY_SEPARATOR + "queryTree.bf");
 
-VERBOSITY_LEVEL = 10;
-
 LikelihoodFunction lf_qcap = (filteredData, givenTree);
 Optimize (res, lf_qcap);
 fprintf (stdout, lf_qcap);
