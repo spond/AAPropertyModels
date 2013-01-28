@@ -15,8 +15,11 @@ propset  = 0; /* 0: Conant; 1: Atchley */
 
 ChoiceList (_qcap_propset,"Amino-acid properties to use",1,SKIP_NONE,
             "Conant-Stadler","Use the five properties defined in the Conant and Stadler LCAP model [Mol Biol Evol (2009) 26 (5): 1155-1161. doi: 10.1093/molbev/msp031]",
-            "Atchley","Use the five properties derived from a factor analysis of 500 amino-acid properties [Table 2 in PNAS (2005) 102(18) 6395-6400 doi: 10.1073/pnas.0408677102]");
-
+            "Atchley","Use the five properties derived from a factor analysis of 500 amino-acid properties [Table 2 in PNAS (2005) 102(18) 6395-6400 doi: 10.1073/pnas.0408677102]",
+            "Load from file", "Use a list of properties from loaded from a file",
+            "Derive from raw properties","Given a collection of raw properties N, and the number of dimensions D, find the best linear D linear combinations of original N vectors",
+            "Fit parametrically","Directly infer the 'best' N property vectors from the data");
+              
 if (_qcap_propset < 0) {
     return -1;
 }
@@ -29,13 +32,79 @@ if (_qcap_propset == 0 ) {
     prop_file = HYPHY_LIB_DIRECTORY + "TemplateBatchFiles" + DIRECTORY_SEPARATOR + "TemplateModels" + DIRECTORY_SEPARATOR + "EmpiricalAA" + DIRECTORY_SEPARATOR + "LCAP";
 	fscanf (prop_file , "NMatrix,NMatrix,NMatrix,NMatrix,NMatrix", prop_0, prop_1, prop_2, prop_3, prop_4 );
 } else {
-	//fscanf ( HYPHY_LIB_DIRECTORY + "TemplateBatchFiles" + DIRECTORY_SEPARATOR + "TemplateModels" + DIRECTORY_SEPARATOR + "EmpiricalAA" + DIRECTORY_SEPARATOR + "atchley_properties.txt", "NMatrix", prop ); 
-	fscanf (atchley_properties.txt, "NMatrix", prop);
-	
-	/* prop contain numProps columns, each with 20 property values */
+    LoadFunctionLibrary("GrabBag");
+    if (_qcap_propset == 1) {
+	    //fscanf ( HYPHY_LIB_DIRECTORY + "TemplateBatchFiles" + DIRECTORY_SEPARATOR + "TemplateModels" + DIRECTORY_SEPARATOR + "EmpiricalAA" + DIRECTORY_SEPARATOR + "atchley_properties.txt", "NMatrix", prop ); 
+        fscanf ("atchley_properties.txt", "NMatrix", prop);
+        // prop contain numProps columns, each with 20 property values  
+        map = mapStrings(_hyphyAAOrdering,_alphabeticalAAOrdering);
+    } else {
+        if (_qcap_propset == 2) {
+            SetDialogPrompt ("Load a set of numerical properties from a file:");
+            fscanf (PROMPT_FOR_FILE, "String,NMatrix", _fileAAOrdering, prop);
+            numProps = Columns (prop);
+            map = mapStrings(_hyphyAAOrdering,_fileAAOrdering);
+        } else {
+            if (_qcap_propset == 3) {
+                SetDialogPrompt ("Load the file with property sets");
+                fscanf (PROMPT_FOR_FILE, "String,Matrix,NMatrix",_fileAAOrdering,_propNames,_propValues);
+                _property_count = Min (10,Rows (_propValues));            
+                _qcap_settings["Properties"] += " from file " + LAST_FILE_PATH;
+            } else {
+                _fileAAOrdering = _hyphyAAOrdering ^ {{"X",""}};
+                _property_count = 10;
+            }
+            
+            map = mapStrings(_hyphyAAOrdering,_fileAAOrdering);
+            //fprintf (stdout, map, "\n");
+            numProps = prompt_for_a_value ("How many composite properties should be inferred",5,1,Min(10,_property_count),1);
+            _qcap_settings["Components"] = numProps;
+            
+            prop = {20,numProps};
+            
+            _dim_reduction_parameters = {};
+            
+            if (_qcap_propset == 3) {
+                for (_r = 0; _r < _property_count; _r+=1) {
+                    for (_c = 0; _c < numProps; _c += 1) {
+                        var_name = "_transformer_" + _r + "_" + _c;
+                        ExecuteCommands ("global `var_name` = 0;`var_name`:>-10;`var_name`:< 10;"); 
+                    }
+                }
+            }
 
-	LoadFunctionLibrary("GrabBag");
-	map = mapStrings(_hyphyAAOrdering,_alphabeticalAAOrdering);
+            for (_c = 0; _c < numProps; _c += 1) {     
+                _sum = {20,1};
+                 for (_r = 0; _r < 20; _r +=1) {
+                    var_name = "_prop_" + _c + "_" + _fileAAOrdering[_r];
+                    ExecuteCommands ("global `var_name` = Random(-1,1);`var_name`:>-100;`var_name`:< 100;`var_name` = 0;"); 
+                    _sum     [_r] = var_name;
+                }
+                ExecuteCommands ("global _scaler_" + _c + ":=" + Join ("+", _sum) + ";_scaler_" + _c + ":>-10000;");
+                //fprintf (stdout, "global _scaler_" + _c + ":=" + Join ("+", _sum) + ";_scaler_" + _c + ":>-10000;\n");
+            }
+                   
+            for (_r = 0; _r < 20; _r += 1) {
+                for (_c = 0; _c < numProps; _c += 1) {     
+                    var_name = "_prop_" + _c + "_" + _fileAAOrdering[_r];
+                    if (_qcap_propset == 3) {
+                        _entry = {_property_count, 1};
+                        for (_p = 0; _p < _property_count; _p += 1) {
+                            _entry [_p] = "_transformer_" + _p + "_" + _c + "*(" + _propValues[_p][_r] + ")";
+                        }
+                        
+                        _entry = Join("+",_entry);
+                        ExecuteCommands ("`var_name` := `_entry`;"); 
+                     } 
+                                        
+                    _dim_reduction_parameters + var_name;
+                    ExecuteCommands ("prop[_r][_c] = \"(`var_name`-_scaler_"+_c + "*0.05)\";");
+                }
+            }
+            
+            //fprintf (stdout, prop, "\n");
+        }
+    }
 }
 
 
@@ -100,14 +169,26 @@ function BuildCodonFrequencies3x4 (obsF)
 	return result*(1.0/PIStop);
 }
 
+
 /*---------------------------------------------------------------------------------------------------------*/
 												  
-function PopulateModelMatrix (ModelMatrixName&, EFV, freqs, global_name_prefix, include_srv, negative_neutral)
+function PopulateModelMatrix (ModelMatrixName&, EFV, freqs, global_name_prefix, include_srv, negative_neutral, copy_nucrates)
 {
 	if (!ModelMatrixDimension) {
 		ModelMatrixDimension = 64 - (_Genetic_Code["_MATRIX_ELEMENT_VALUE_ == 10"]*Transpose(_Genetic_Code["1"]))[0];
 	}
-		
+
+    _my_nucBiasTerms = _nucBiasTerms;
+    
+    if (Abs(global_name_prefix) > 0 && copy_nucrates) {
+	    for ( aaprop = 0; aaprop < 16; aaprop += 1 ) {
+	        if (_my_nucBiasTerms[aaprop$4][aaprop%4] != "") {
+	            _my_nucBiasTerms[aaprop$4][aaprop%4] = global_name_prefix + _my_nucBiasTerms[aaprop$4][aaprop%4];
+	        }
+	    }
+        _defineNucBias (_my_nucBiasTerms);
+    }
+    		
 	ModelMatrixName = {ModelMatrixDimension,ModelMatrixDimension}; 
 	
 	if (include_srv>1) {
@@ -119,7 +200,6 @@ function PopulateModelMatrix (ModelMatrixName&, EFV, freqs, global_name_prefix, 
 	    nonsynCatRateMult = "synRate*";
 	}
 	
-	
 	modelDefString = "";
 	modelDefString*16384;
 	
@@ -129,8 +209,14 @@ function PopulateModelMatrix (ModelMatrixName&, EFV, freqs, global_name_prefix, 
 	for ( aaprop = 0; aaprop < numProps; aaprop += 1 ) {
 	    alpha_parameter_name = global_name_prefix + "alpha_" + aaprop;
 	    alpha_parameter_names [aaprop] = alpha_parameter_name;
-		ExecuteCommands ( "global `alpha_parameter_name` = 0.5; global `alpha_parameter_name` :> -20; global `alpha_parameter_name` :< 20;" );
+		ExecuteCommands ( "global `alpha_parameter_name`=1; global `alpha_parameter_name` :> -20; global `alpha_parameter_name` :< 20;" );
 		_qcap_settings        ["Property Parameters"] + alpha_parameter_name;
+	}
+	
+	if (_qcap_propset >= 3) {
+	    for ( aaprop = 0; aaprop < Abs (_dim_reduction_parameters); aaprop += 1 ) {
+	        _qcap_settings   ["Property Parameters"] + _dim_reduction_parameters[aaprop];
+	    }
 	}
 	
 	if (_qcap_metric == 1) { // weighted components
@@ -230,13 +316,23 @@ function PopulateModelMatrix (ModelMatrixName&, EFV, freqs, global_name_prefix, 
                             if (_qcap_propset == 0) {
                                 ( _aa_differences [_pairID])[aaprop] = Eval ("prop_" + aaprop + "[" + caa1 + "][" + caa2 + "]");
                             } else {
-                                ( _aa_differences [_pairID])[aaprop] = (prop[caa1][aaprop] - prop[caa2][aaprop]);
+                                if (_qcap_propset == 1) {
+                                    ( _aa_differences [_pairID])[aaprop] = (prop[caa1][aaprop] - prop[caa2][aaprop]);
+                                } else {
+                                    ( _aa_differences [_pairID])[aaprop] = prop[caa1][aaprop] + "-(" + prop[caa2][aaprop] + ")"; 
+                                }
                             }
                                    
-                            propMulti = Eval(_metric_prefix + "(" + ( _aa_differences [_pairID])[aaprop] + ")" + _metric_suffix); 
-                            
+                            if (_qcap_propset >= 3) {
+                                propMulti = _metric_prefix + "(" + ( _aa_differences [_pairID])[aaprop] + ")" + _metric_suffix;                                
+                            } else {     
+                                propMulti = Eval(_metric_prefix + "(" + ( _aa_differences [_pairID])[aaprop] + ")" + _metric_suffix); 
+                            }
+                                                        
                             if (_qcap_metric == 1) {
-                                propMulti = Abs(propMulti);
+                                if (_qcap_propset < 2) {
+                                    propMulti = Abs(propMulti);
+                                }
                                 if ( aaprop == 0 ) {
                                     aapropMultiplier * ("Exp(-`_weight`*" + propMulti);						
                                 }
@@ -273,6 +369,7 @@ function PopulateModelMatrix (ModelMatrixName&, EFV, freqs, global_name_prefix, 
                         aapropMultiplier = _aa_multipliers [_pairID];                    
                     }
                 }
+                
 				
 				if ( freqs != 2 ) {
 					if ( freqs == 0 ) { // not position specific 
@@ -281,33 +378,33 @@ function PopulateModelMatrix (ModelMatrixName&, EFV, freqs, global_name_prefix, 
 				
 				    if (freqs != 4) {    				
                         if (aa1==aa2) {
-                            modelDefString*("ModelMatrixName["+hs+"]["+vs+"] := "+synCatRateMult+_nucBiasTerms[transition][transition2]+"EFV__["+ts+"]["+ps+"];\n"+
-                                                         "ModelMatrixName["+vs+"]["+hs+"] := "+synCatRateMult+_nucBiasTerms[transition][transition2]+"EFV__["+ts2+"]["+ps+"];\n");
+                            modelDefString*("ModelMatrixName["+hs+"]["+vs+"] := "+synCatRateMult+_my_nucBiasTerms[transition][transition2]+"EFV__["+ts+"]["+ps+"];\n"+
+                                                         "ModelMatrixName["+vs+"]["+hs+"] := "+synCatRateMult+_my_nucBiasTerms[transition][transition2]+"EFV__["+ts2+"]["+ps+"];\n");
                         }
                         else {
-                            modelDefString*("ModelMatrixName["+hs+"]["+vs+"] := "+nonsynCatRateMult+_nucBiasTerms[transition][transition2]+"EFV__["+ts+"]["+ps+"]*" + aapropMultiplier + ";\n"+
-                                                         "ModelMatrixName["+vs+"]["+hs+"] := "+nonsynCatRateMult+_nucBiasTerms[transition][transition2]+"EFV__["+ts2+"]["+ps+"]*" + aapropMultiplier + ";\n");						
+                            modelDefString*("ModelMatrixName["+hs+"]["+vs+"] := "+nonsynCatRateMult+_my_nucBiasTerms[transition][transition2]+"EFV__["+ts+"]["+ps+"]*" + aapropMultiplier + ";\n"+
+                                                         "ModelMatrixName["+vs+"]["+hs+"] := "+nonsynCatRateMult+_my_nucBiasTerms[transition][transition2]+"EFV__["+ts2+"]["+ps+"]*" + aapropMultiplier + ";\n");						
                         }
                     } else {
                         if (aa1==aa2) {
-                            modelDefString*("ModelMatrixName["+hs+"]["+vs+"] := "+synCatRateMult+_nucBiasTerms[transition][transition2]+EFV[transition][nucPosInCodon] + ";\n"+
-                                                         "ModelMatrixName["+vs+"]["+hs+"] := "+synCatRateMult+_nucBiasTerms[transition][transition2]+EFV[transition2][nucPosInCodon] + ";\n");
+                            modelDefString*("ModelMatrixName["+hs+"]["+vs+"] := "+synCatRateMult+_my_nucBiasTerms[transition][transition2]+EFV[transition][nucPosInCodon] + ";\n"+
+                                                         "ModelMatrixName["+vs+"]["+hs+"] := "+synCatRateMult+_my_nucBiasTerms[transition][transition2]+EFV[transition2][nucPosInCodon] + ";\n");
                         }
                         else {
-                            modelDefString*("ModelMatrixName["+hs+"]["+vs+"] := "+nonsynCatRateMult+_nucBiasTerms[transition][transition2]+EFV[transition][nucPosInCodon] + "*"+ aapropMultiplier + ";\n"+
-                                                         "ModelMatrixName["+vs+"]["+hs+"] := "+nonsynCatRateMult+_nucBiasTerms[transition][transition2]+EFV[transition2][nucPosInCodon] +"*" + aapropMultiplier + ";\n");						
+                            modelDefString*("ModelMatrixName["+hs+"]["+vs+"] := "+nonsynCatRateMult+_my_nucBiasTerms[transition][transition2]+EFV[transition][nucPosInCodon] + "*"+ aapropMultiplier + ";\n"+
+                                                         "ModelMatrixName["+vs+"]["+hs+"] := "+nonsynCatRateMult+_my_nucBiasTerms[transition][transition2]+EFV[transition2][nucPosInCodon] +"*" + aapropMultiplier + ";\n");						
                         }
                     
                     }
 				}
 				else {
 					if (aa1==aa2) {
-						modelDefString*("ModelMatrixName["+hs+"]["+vs+"] := "+synCatRateMult+_nucBiasTerms[transition][transition2]+"1;\n"+
-													 "ModelMatrixName["+vs+"]["+hs+"] := "+synCatRateMult+_nucBiasTerms[transition][transition2]+"1;\n");
+						modelDefString*("ModelMatrixName["+hs+"]["+vs+"] := "+synCatRateMult+_my_nucBiasTerms[transition][transition2]+"1;\n"+
+													 "ModelMatrixName["+vs+"]["+hs+"] := "+synCatRateMult+_my_nucBiasTerms[transition][transition2]+"1;\n");
 					}
 					else {
-						modelDefString*("ModelMatrixName["+hs+"]["+vs+"] := "+nonsynCatRateMult+_nucBiasTerms[transition][transition2]+aapropMultiplier + "*1;\n"+
-													 "ModelMatrixName["+vs+"]["+hs+"] := "+nonsynCatRateMult+_nucBiasTerms[transition][transition2]+aapropMultiplier + "*1;\n");						
+						modelDefString*("ModelMatrixName["+hs+"]["+vs+"] := "+nonsynCatRateMult+_my_nucBiasTerms[transition][transition2]+aapropMultiplier + "*1;\n"+
+													 "ModelMatrixName["+vs+"]["+hs+"] := "+nonsynCatRateMult+_my_nucBiasTerms[transition][transition2]+aapropMultiplier + "*1;\n");						
 					}
 				}
 			}
@@ -380,23 +477,28 @@ for (customLoopCounter2=2; customLoopCounter2<6; customLoopCounter2 += 1) {
 	}
 }
 
-prev = "";
-for ( i = 0; i < Columns ( _nucBiasTerms ); i = i + 1 ) {
-	for ( j = 0; j < Rows ( _nucBiasTerms ); j = j + 1 ) {
-		if ( Abs ( _nucBiasTerms [i][j] ) ) {
-			nucPair = _nucBiasTerms [i][j];
-			if ( prev != nucPair ) {
-			    // only define if the variable does not already exist
-			    nucRateName = nucPair[0][Abs(nucPair)-2];
-			    GetInformation (exists, nucRateName);
-			    if (Rows (exists) == 0) {
-				    ExecuteCommands ( "global `nucRateName` = 1;" );
-				}
-				prev = nucPair;
-			}
-		}
-	}
+function _defineNucBias (_nucBiasTerms) {
+    prev = "";
+    for ( i = 0; i < Columns ( _nucBiasTerms ); i = i + 1 ) {
+        for ( j = 0; j < Rows ( _nucBiasTerms ); j = j + 1 ) {
+            if ( Abs ( _nucBiasTerms [i][j] ) ) {
+                nucPair = _nucBiasTerms [i][j];
+                if ( prev != nucPair ) {
+                    // only define if the variable does not already exist
+                    nucRateName = nucPair[0][Abs(nucPair)-2];
+                    GetInformation (exists, nucRateName);
+                    if (Rows (exists) == 0) {
+                        ExecuteCommands ( "global `nucRateName` = 1;" );
+                    }
+                    prev = nucPair;
+                }
+            }
+        }
+    }
+    return 0;
 }
+
+_defineNucBias (_nucBiasTerms);
 
 COUNT_GAPS_IN_FREQUENCIES = 0;
 
@@ -432,7 +534,7 @@ else {
 	}
 }
 
-MULTIPLY_BY_FREQS = PopulateModelMatrix ("QCAP", observedFreq, freqType, "", 0, 0 );
+MULTIPLY_BY_FREQS = PopulateModelMatrix ("QCAP", observedFreq, freqType, "", 0, 0 , 1);
 Model QCAPModel = (QCAP,vectorOfFrequencies,MULTIPLY_BY_FREQS);
 
 
