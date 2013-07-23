@@ -22,7 +22,7 @@ MESSAGE_LOGGING = 0;
     
     REPLACE_TREE_STRUCTURE = 1;
     rOptions = 4;
-    LoadFunctionLibrary("qndhelper2")
+    ExecuteAFile (HYPHY_LIB_DIRECTORY + "TemplateBatchFiles" + DIRECTORY_SEPARATOR + "qndhelper2.ibf");
     
     saveNucs = {{AC__,AT__,CG__,CT__,GT__}};
                                     
