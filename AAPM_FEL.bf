@@ -5,6 +5,7 @@ MESSAGE_LOGGING = 0;
 /******************************************************************************************************/
 
     LoadFunctionLibrary ("GrabBag");
+    _DO_TREE_REBALANCE_ = 0;
     ExecuteAFile (HYPHY_LIB_DIRECTORY + "TemplateBatchFiles" + DIRECTORY_SEPARATOR + "qndhelper1.ibf");
     modelDesc = ModelTitle; 
         // ModelTitle comes from qndhelper1; setting modelDesc here will stop QCAP.mdl from propmting for it
@@ -19,6 +20,26 @@ MESSAGE_LOGGING = 0;
     }
 
     fprintf (stdout, "Using the ", SELECTION_STRINGS , " metric\n");    
+
+    if (_fel_test_type == 0) {
+        ChoiceList (_branch_test_type,"Branch subset?",1,SKIP_NONE,
+                "Test all branches","All branches in the tree will be examined",
+                "Test a subset of branches","Only a user-specified list of branches will be tested");
+            
+        if (_branch_test_type < 0) {
+            return -1;
+        }
+        
+        if (_branch_test_type == 1) {
+            SetDialogPrompt ("Load branch partitioning info");
+            fscanf (PROMPT_FOR_FILE, "Lines", _branches_loaded);
+            LoadFunctionLibrary ("TreePartitioning.ibf");
+            assert (ValidateBranchList ("givenTree", _branches_loaded) && Columns (_branches_loaded) > 0);
+            MULTIPLY_BY_FREQS = PopulateModelMatrix ("QCAPBG", observedFreq, freqType, "_BG_", 0, 0, 0 ); // the last "1" argument forces the model to cap 'omega' at 1.
+            Model QCAPModelBG = (QCAPBG,vectorOfFrequencies,MULTIPLY_BY_FREQS);
+        }
+    }
+
     
     REPLACE_TREE_STRUCTURE = 1;
     rOptions = 4;
@@ -64,13 +85,17 @@ if (_fel_test_type == 0) {
     "Test property 5" : {"Parameter": "alpha_4", "Constraint" : "alpha_4 := 0", "Cleanup" : "alpha_4 = 1"}
     };
     
-    results = runFELTestsOnPartition ("filteredData", "QCAPModel", treeString, "codonTree", "synRate", "synRate", _felTests, 1, _felRawResultFile);
+    if (_branch_test_type) {
+        results = runFELTestsOnPartition ("filteredData", "QCAPModel", treeString, "QCAPModelBG", _branches_loaded, "codonTree", "synRate", "synRate", _felTests, 1, _felRawResultFile);
+    } else {
+        results = runFELTestsOnPartition ("filteredData", "QCAPModel", treeString, "", 0, "codonTree", "synRate", "synRate", _felTests, 1, _felRawResultFile);        
+    }   
     results["SETTINGS"] = _qcap_settings;
     
 } else {
 
     fullSettings =  _qcap_settings;
-    MULTIPLY_BY_FREQS = PopulateModelMatrix ("QCAPNeutNeg", observedFreq, freqType, "", 0, 1 ); // the last "1" argument forces the model to cap 'omega' at 1.
+    MULTIPLY_BY_FREQS = PopulateModelMatrix ("QCAPNeutNeg", observedFreq, freqType, "", 0, 1, 0 ); // the last "1" argument forces the model to cap 'omega' at 1.
 
     Model QCAPModelNeutNeg = (QCAPNeutNeg,vectorOfFrequencies,MULTIPLY_BY_FREQS);
 
@@ -79,8 +104,8 @@ if (_fel_test_type == 0) {
         // only these parameters (and the default syn rate scaler) will be fitted at a site; all others will be constrained to current values
     };
     
-    nullModel  = runFELTestsOnPartition ("filteredData", "QCAPModelNeutNeg", treeString, "codonTree", "synRate", "synRate", _felTests, 1, _felRawResultFile);
-    results    = runFELTestsOnPartition ("filteredData", "QCAPModel", treeString, "codonTree", "synRate", "synRate", _felTests, 1, _felRawResultFile);
+    nullModel  = runFELTestsOnPartition ("filteredData", "QCAPModelNeutNeg", treeString, "", 0, "codonTree", "synRate", "synRate", _felTests, 1, _felRawResultFile);
+    results    = runFELTestsOnPartition ("filteredData", "QCAPModel", treeString, "", 0, "codonTree", "synRate", "synRate", _felTests, 1, _felRawResultFile);
     
     for (_copyVarValue = 0; _copyVarValue < Abs(nullModel); _copyVarValue += 1) {
         _thisParameter = nullModel ["INDEXORDER"][_copyVarValue];
@@ -93,7 +118,7 @@ fprintf (_felRawResultFile, CLEAR_FILE, results);
 
 /******************************************************************************************************/
 
-function runFELTestsOnPartition (filterName, modelName, treeString, copyLengthsFrom, blParameter1, blParameter2, testsToRun, verbose, resultFile) {
+function runFELTestsOnPartition (filterName, modelName, treeString, bgModel, fgBranchList, copyLengthsFrom, blParameter1, blParameter2, testsToRun, verbose, resultFile) {
 
     FEL._optimizationTaskInformation = {};
  
@@ -103,11 +128,21 @@ function runFELTestsOnPartition (filterName, modelName, treeString, copyLengthsF
     
     _testNames = Rows (testsToRun);
 
-    ExecuteCommands ("UseModel (`modelName`);
-                      Tree	 _felSiteTree = treeString;
-                      global _felScaler   = 1;
-                      ReplicateConstraint (\"this1.?.`blParameter1`:=_felScaler*this2.?.`blParameter2`__\",_felSiteTree,`copyLengthsFrom`);");
-                      
+    if (Abs (bgModel)) {
+         ExecuteCommands ("UseModel (`bgModel`);
+                          Tree	 _felSiteTree = treeString;
+                          for (b = 0; b < Columns (fgBranchList); b += 1) {
+                            ExecuteCommands (\"SetParameter (_felSiteTree.\"+fgBranchList[b]+\", MODEL, `modelName`)\"); 
+                          }
+                          global _felScaler   = 1;
+                          ReplicateConstraint (\"this1.?.`blParameter1`:=_felScaler*this2.?.`blParameter2`__\",_felSiteTree,`copyLengthsFrom`);");   
+    } else {
+        ExecuteCommands ("UseModel (`modelName`);
+                          Tree	 _felSiteTree = treeString;
+                          global _felScaler   = 1;
+                          ReplicateConstraint (\"this1.?.`blParameter1`:=_felScaler*this2.?.`blParameter2`__\",_felSiteTree,`copyLengthsFrom`);");
+    }
+                          
     _site_count = Eval ("`filterName`.sites");   
     
     ExecuteCommands ("GetDataInfo (_mapSitesToUnuiquePatterns, `filterName`);
@@ -177,6 +212,11 @@ function runFELTestsOnPartition (filterName, modelName, treeString, copyLengthsF
             for (_global_var = 0; _global_var < Columns (FEL._siteGlobalParameters); _global_var += 1) {
                 _init_value = (testsToRun["Full model"])[FEL._siteGlobalParameters[_global_var]];
                 if (_init_value == 0) {
+                    if (Abs (bgModel)) {
+                        if ((FEL._siteGlobalParameters[_global_var] $ "^_BG")[0] == 0) {
+                            continue;
+                        }
+                    }
                     if (verbose) {
                         fprintf (stdout, "......Constraining ",FEL._siteGlobalParameters[_global_var],"\n");
                     }                    
@@ -251,11 +291,11 @@ function _felSendAJob (_patternID, _testName, _testSpecification, verbose) {
     }
     if (MPI_NODE_COUNT <= 1) {
         Optimize (FEL._felSiteLF_MLES, FEL._felSiteLF);
-        
     
+        /*
         LIKELIHOOD_FUNCTION_OUTPUT = 7;
         fprintf ("" + _patternID + "." + _testName, CLEAR_FILE, FEL._felSiteLF);
-        
+        */
         
         FEL._felSiteLF_MLE_VALUES = {};
         for (_copyVarValue = 0; _copyVarValue < Abs(FEL._fullParameterList); _copyVarValue += 1) {
@@ -315,6 +355,8 @@ function _felReceiveAJob (verbose) {
         _MLES [_thisParameter] = FEL._felSiteLF_MLE_VALUES[_thisParameter];
     }
     ((FEL._felUniqueSitePatternResults[finishedSitePattern])[finishedTestName])["MLES"] = _MLES;
+    
+    fprintf (stdout, "\n", ((FEL._felUniqueSitePatternResults[finishedSitePattern])[finishedTestName]), "\n");
     
     return _fromID;
 } 

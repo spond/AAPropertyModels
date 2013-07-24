@@ -1,0 +1,45 @@
+LoadFunctionLibrary ("TreeTools");
+LoadFunctionLibrary ("GrabBag");
+
+function labelBranchesByRegExp (treeID, regExp, label) {
+    treeAVL = Eval (treeID + "^0");
+    
+    taggedBranches = {};
+    
+	for (_nodeIterator = 1; _nodeIterator < Abs (treeAVL)-1; _nodeIterator += 1) {
+	    _nodeInfo = treeAVL[_nodeIterator];
+	    (treeAVL[_nodeIterator])[label] = 0;
+	    if (Abs(_nodeInfo ["Children"]) == 0) {
+	        if ((_nodeInfo["Name"] $ regExp)[0] >= 0) {
+	     	    (treeAVL[_nodeIterator])[label] = 1;
+	     	    taggedBranches [_nodeInfo["Name"]] = 1;
+	        }
+	    }
+	}
+	
+	_parsimonyAncestralMapping ("treeAVL", label);
+	
+	for (_nodeIterator = 1; _nodeIterator < Abs (treeAVL)-1; _nodeIterator += 1) {
+	    _nodeInfo = treeAVL[_nodeIterator];
+	    if (Abs(_nodeInfo ["Children"])) {
+	        if (_nodeInfo[label] == 1) {
+	     	    taggedBranches [_nodeInfo["Name"]] = 1;	            
+	        }
+	    }
+	}
+	
+	return Rows (taggedBranches);
+}
+
+function ValidateBranchList (treeID, branchList) {
+    validBN = Eval("BranchName (`treeID`, -1)");
+    validBN = stringMatrixToAVL ("validBN");
+    
+    for (k = 0; k < Columns(branchList)*Rows(branchList); k+=1) {
+        if (validBN[branchList[k]] == 0) {
+            fprintf (stdout, "\n", branchList[k], "\n", validBN, "\n");
+            return 0;
+        }
+    }
+    return 1;
+}
